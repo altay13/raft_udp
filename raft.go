@@ -2,6 +2,7 @@ package raft
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -17,6 +18,8 @@ type Raft struct {
 	stateLock sync.Mutex
 	self      *State
 
+	stateCh chan int
+
 	nodes   []*Node
 	nodeMap map[string]*Node
 
@@ -28,7 +31,7 @@ type Raft struct {
 	electionTimeoutTicker     *time.Ticker
 
 	beartBeatChan sync.Mutex
-	hbChan        chan *leaderHeartBeat // Altay check it
+	hbChan        chan *heartBeat // Altay check it
 
 	votes chan int
 
@@ -53,13 +56,15 @@ func newRaft(conf *Config) (*Raft, error) {
 		tcpListener:  tcpln.(*net.TCPListener),
 		udpListener:  udpln.(*net.UDPConn),
 		nodeMap:      make(map[string]*Node),
-		hbChan:       make(chan *leaderHeartBeat, 1),
+		hbChan:       make(chan *heartBeat, 1),
 		votes:        make(chan int),
 		stateChanged: make(chan bool),
 	}
 
 	go r.ListenTCP()
 	go r.ListenUDP()
+
+	go r.handleState()
 
 	return r, nil
 }
@@ -71,12 +76,14 @@ func Init(conf *Config) (*Raft, error) {
 		return nil, err
 	}
 
-	state, err := createInitState(conf)
+	st, err := createInitState(conf)
 	if err != nil {
 		return nil, err
 	}
 
-	r.self = state
+	r.self = st
+
+	r.stateCh <- r.self.state
 
 	return r, nil
 }
@@ -86,12 +93,42 @@ func createInitState(conf *Config) (*State, error) {
 	// name := fmt.Sprintf("%s:%d&%d", conf.BindAddr, conf.BindTCPPort, conf.BindUDPPort)
 
 	state := &State{
-		state:    Leader,
-		leaderID: conf.Name,
+		state:    Follower,
+		leaderID: "",
 		term:     0,
 		vote:     0,
 		votedFor: "",
 	}
 
 	return state, nil
+}
+
+// Join func
+func Join(conf *Config, joinAddr string, port int) (*Raft, error) {
+	r, err := newRaft(conf)
+	if err != nil {
+		return nil, err
+	}
+
+	st, err := createInitState(conf)
+	if err != nil {
+		return nil, err
+	}
+
+	r.self = st
+
+	return r, nil
+}
+
+// Nodes ...
+func (r *Raft) Nodes() []*Node {
+	return r.nodes
+}
+
+// Shutdown closes the listener and shuts down the Raft
+func (r *Raft) Shutdown() {
+	r.tcpListener.Close()
+	r.udpListener.Close()
+
+	log.Println("Shutting down the Raft...")
 }

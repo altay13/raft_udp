@@ -13,11 +13,9 @@ const (
 )
 
 const (
-	pingMsg = iota
-	ackRespMsg
+	heartBeatMsg = iota
 	joinPingMsg
 	joinAckRespMsg
-	leaderHeartBeatMsg
 	voteRequestMsg
 	voteResponseMsg
 )
@@ -26,17 +24,9 @@ type msgHeader struct {
 	MsgType int
 }
 
-type ping struct {
-	Seq int
-}
-
-type leaderHeartBeat struct {
+type heartBeat struct {
 	Term int
 	Name string
-}
-
-type ackResp struct {
-	Seq int
 }
 
 type joinPing struct {
@@ -100,7 +90,7 @@ func (n *Raft) ListenUDP() {
 		buf = buf[2:]
 
 		switch msgType {
-		// case leaderHeartBeatMsg:
+		// case heartBeatMsg:
 		// 	fmt.Printf("Got the Ping from Leader <--> %s\n", addr)
 		// 	n.handleLeaderPing(addr, buf)
 		// case pingMsg:
