@@ -18,8 +18,8 @@ func DefaultConf() *Config {
 	config := &Config{
 		Name:         hostname,
 		BindAddr:     "127.0.0.1",
-		BindTCPPort:  1234,
-		BindUDPPort:  1234,
+		BindTCPPort:  1111,
+		BindUDPPort:  1111,
 		ElectionTime: 3,
 	}
 

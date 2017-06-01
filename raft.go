@@ -30,10 +30,13 @@ type Raft struct {
 	electionTimeoutTickerLock sync.Mutex
 	electionTimeoutTicker     *time.Ticker
 
+	votingTimeoutTickerLock sync.Mutex
+	votingTimeoutTicker     *time.Ticker
+
 	beartBeatChan sync.Mutex
 	hbChan        chan *heartBeat // Altay check it
 
-	votes chan int
+	votes chan *Vote
 
 	stateChanged chan bool
 }
@@ -57,8 +60,9 @@ func newRaft(conf *Config) (*Raft, error) {
 		udpListener:  udpln.(*net.UDPConn),
 		nodeMap:      make(map[string]*Node),
 		hbChan:       make(chan *heartBeat, 1),
-		votes:        make(chan int),
+		votes:        make(chan *Vote, 100),
 		stateChanged: make(chan bool),
+		stateCh:      make(chan int),
 	}
 
 	go r.ListenTCP()
@@ -96,8 +100,10 @@ func createInitState(conf *Config) (*State, error) {
 		state:    Follower,
 		leaderID: "",
 		term:     0,
-		vote:     0,
-		votedFor: "",
+		vote: &Vote{
+			votedFor:    "",
+			voteGranted: false,
+		},
 	}
 
 	return state, nil
@@ -131,4 +137,24 @@ func (r *Raft) Shutdown() {
 	r.udpListener.Close()
 
 	log.Println("Shutting down the Raft...")
+}
+
+// GetState temporary function
+func (r *Raft) GetState() {
+
+	fmt.Println("Machine name: ", r.config.Name)
+
+	fmt.Printf("Nodes: \n")
+	for num, node := range r.Nodes() {
+		fmt.Printf("%d : %s\n", num, node.Name)
+	}
+
+	switch r.self.state {
+	case Follower:
+		fmt.Println("I am Follower")
+	case Leader:
+		fmt.Println("I am Leader")
+	case Candidate:
+		fmt.Println("I am Candidate")
+	}
 }
