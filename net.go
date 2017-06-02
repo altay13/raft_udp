@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/rpc"
 )
 
 const (
@@ -25,8 +24,8 @@ type msgHeader struct {
 }
 
 type heartBeat struct {
-	Term int
-	Name string
+	Term        int
+	CandidateID string
 }
 
 type joinPing struct {
@@ -40,8 +39,7 @@ type joinAckResp struct {
 }
 
 type voteRequest struct {
-	Term         int
-	CandidateID  string
+	Self         *heartBeat
 	LastLogIndex int
 	LastLogTerm  int
 }
@@ -53,20 +51,21 @@ type voteResponse struct {
 
 // ListenTCP listens for the RPC calls
 func (r *Raft) ListenTCP() {
-	rpcs := rpc.NewServer()
-	rpc.Register(r)
-	for {
-		conn, err := r.tcpListener.Accept()
-		if err != nil {
-			log.Printf("Failed to accept. Err: %s", err)
-			continue
-		}
-
-		fmt.Printf("Accepted the connection from %s\n", conn.RemoteAddr())
-
-		go rpcs.ServeConn(conn)
-
-	}
+	return
+	// rpcs := rpc.NewServer()
+	// rpc.Register(r)
+	// for {
+	// 	conn, err := r.tcpListener.Accept()
+	// 	if err != nil {
+	// 		log.Printf("Failed to accept. Err: %s", err)
+	// 		continue
+	// 	}
+	//
+	// 	fmt.Printf("Accepted the connection from %s\n", conn.RemoteAddr())
+	//
+	// 	go rpcs.ServeConn(conn)
+	//
+	// }
 }
 
 // ListenUDP listens for the udp packages
@@ -93,12 +92,60 @@ func (r *Raft) ListenUDP() {
 		case heartBeatMsg:
 			fmt.Printf("Got the Heart beat from <--> %s\n", addr)
 			r.handleHeartBeat(addr, buf)
+		case voteRequestMsg:
+			fmt.Printf("Got the Vote Request from <--> %s\n", addr)
+
+		case voteResponseMsg:
+			fmt.Printf("Got the Heart beat Response from <--> %s\n", addr)
+		case joinPingMsg:
+			fmt.Printf("Got the Join Ping from <--> %s\n", addr)
+			r.handleJoinPing(addr, buf)
+		case joinAckRespMsg:
+			fmt.Printf("Got the Join Ack Resp from <--> %s\n", addr)
+			r.handleJoinAckResp(addr, buf)
 		default:
 			fmt.Printf("couldn't parse the msg from %s", addr)
 			continue
 		}
 
 	}
+}
+
+func (r *Raft) handleJoinPing(from net.Addr, msg []byte) {
+	var p *joinPing
+
+	err := decode(msg, &p)
+	if err != nil {
+		log.Printf("Failed to read the ping UDP packet. Err %s", err)
+		return
+	}
+
+	// add to netradler nodes
+	err = r.addNode(p.Node)
+	if err != nil {
+		log.Printf("Failed to add the node information. Err %s", err)
+		return
+	}
+
+	err = r.invokeJoinAckResp(from, p)
+	if err != nil {
+		log.Printf("Failed to invoke JoinAckResp. Err %s", err)
+	}
+}
+
+func (r *Raft) handleJoinAckResp(from net.Addr, msg []byte) {
+	var ack joinAckResp
+
+	err := decode(msg, &ack)
+	if err != nil {
+		log.Printf("Failed to read the ack response UDP Packet. Err %s", err)
+	}
+
+	err = r.syncStateAfterJoin(&ack)
+	if err != nil {
+		log.Printf("Failed to sync state after join. Err %s", err)
+	}
+
 }
 
 func (r *Raft) handleHeartBeat(from net.Addr, msg []byte) {
@@ -110,7 +157,22 @@ func (r *Raft) handleHeartBeat(from net.Addr, msg []byte) {
 		return
 	}
 
+	if len(r.Nodes()) <= 0 {
+		// Altay return to here and finish this workflow...
+	}
 	r.invokeVoteReponse(from, &hb)
+}
+
+func (r *Raft) handleVoteRequest(from net.Addr, msg []byte) {
+	vr := &voteRequest{}
+
+	err := decode(msg, &vr)
+	if err != nil {
+		log.Printf("Failed to read the HeartBeat UDP packet. Err %s", err)
+		return
+	}
+
+	r.invokeVoteReponse(from, vr.Self)
 }
 
 func (r *Raft) invokeVoteReponse(from net.Addr, hb *heartBeat) {

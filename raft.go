@@ -101,8 +101,8 @@ func createInitState(conf *Config) (*State, error) {
 		leaderID: "",
 		term:     0,
 		vote: &Vote{
-			votedFor:    "",
-			voteGranted: false,
+			votedFor:   "",
+			voteStatus: UnknownVote,
 		},
 	}
 
@@ -121,7 +121,12 @@ func Join(conf *Config, joinAddr string, port int) (*Raft, error) {
 		return nil, err
 	}
 
+	st.state = Unknown
 	r.self = st
+
+	addr := getUDPAddr(joinAddr, port)
+
+	go r.joinToClusterByAddr(addr)
 
 	return r, nil
 }

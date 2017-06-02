@@ -59,8 +59,8 @@ func (r *Raft) getUDPAddress() (addr string) {
 }
 
 func getElectionTicker(n int) *time.Ticker {
-	rnd := int(rand.Float32() * 1000)
-	intrv := n*1000 + rnd
+	rnd := int(rand.Float32() * 100)
+	intrv := n + rnd
 
 	return time.NewTicker(time.Duration(intrv) * time.Millisecond)
 }
@@ -89,8 +89,8 @@ func (r *Raft) sendMsg(to net.Addr, msg *bytes.Buffer) error {
 
 func (r *Raft) voteForSelf() {
 	vt := &Vote{
-		votedFor:    r.config.Name,
-		voteGranted: true,
+		votedFor:   r.config.Name,
+		voteStatus: Voted,
 	}
 	r.votes <- vt
 }
@@ -101,12 +101,12 @@ func (r *Raft) addVote(vt *Vote) {
 		log.Printf("Node was not found: %s", vt.votedFor)
 	}
 
-	node.State.vote = vt
+	node.VoteStatus = vt.voteStatus
 }
 
 func (r *Raft) releaseVotes() error {
 	for _, node := range r.Nodes() {
-		node.State = nil
+		node.VoteStatus = UnknownVote
 	}
 
 	return nil
@@ -118,9 +118,9 @@ func (r *Raft) calculateVotes() bool {
 	online := 0
 	votes := 0
 	for _, node := range r.Nodes() {
-		if node.State.vote != nil {
+		if node.VoteStatus != UnknownVote {
 			online++
-			if node.State.vote.voteGranted {
+			if node.VoteStatus == Voted {
 				votes++
 			}
 		}
@@ -142,7 +142,7 @@ func (r *Raft) resetTicker() {
 func (r *Raft) stopTicker() {
 	r.electionTimeoutTickerLock.Lock()
 	r.electionTimeoutTicker.Stop()
-	r.electionTimeoutTicker = nil
+	// r.electionTimeoutTicker = nil
 	r.electionTimeoutTickerLock.Unlock()
 }
 
@@ -155,6 +155,25 @@ func (r *Raft) resetVotingTicker() {
 func (r *Raft) stopVotingTicker() {
 	r.votingTimeoutTickerLock.Lock()
 	r.votingTimeoutTicker.Stop()
-	r.votingTimeoutTicker = nil
+	// r.votingTimeoutTicker = nil
 	r.votingTimeoutTickerLock.Unlock()
+}
+
+func (r *Raft) resetHeartBeat() {
+	r.heartBeatLock.Lock()
+	r.heartBeat = getElectionTicker(r.config.ElectionTime - r.config.ElectionTime/2)
+	r.heartBeatLock.Unlock()
+}
+
+func (r *Raft) stopHeartBeatTicker() {
+
+	if r.heartBeat == nil {
+		r.heartBeat = getElectionTicker(r.config.ElectionTime - r.config.ElectionTime/2)
+	}
+
+	r.heartBeatLock.Lock()
+	r.heartBeat.Stop()
+	// r.stopHeartBeat <- true
+	// r.electionTimeoutHeartBeat = nil
+	r.heartBeatLock.Unlock()
 }

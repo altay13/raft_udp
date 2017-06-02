@@ -20,7 +20,7 @@ func DefaultConf() *Config {
 		BindAddr:     "127.0.0.1",
 		BindTCPPort:  1111,
 		BindUDPPort:  1111,
-		ElectionTime: 3,
+		ElectionTime: 3000,
 	}
 
 	return config

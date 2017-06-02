@@ -10,6 +10,14 @@ const (
 	Follower = iota
 	Candidate
 	Leader
+	Unknown
+)
+
+// Voted ...
+const (
+	Voted = iota
+	NotVote
+	UnknownVote
 )
 
 // State ...
@@ -22,15 +30,21 @@ type State struct {
 
 // Node ...
 type Node struct {
-	Name  string
-	Addr  *net.UDPAddr
-	State *State
+	Name       string
+	Addr       *net.UDPAddr
+	VoteStatus int
+}
+
+// NodeJoin ...
+type NodeJoin struct {
+	Name string
+	Addr *net.UDPAddr
 }
 
 // Vote ...
 type Vote struct {
-	votedFor    string
-	voteGranted bool
+	votedFor   string
+	voteStatus int
 }
 
 func (r *Raft) handleState() {
@@ -40,6 +54,8 @@ func (r *Raft) handleState() {
 			switch s {
 			case Follower:
 				fmt.Println("State Changed to: Follower")
+
+				r.stopHeartBeatTicker()
 
 				r.stateLock.Lock()
 				r.self.state = Follower
@@ -56,9 +72,11 @@ func (r *Raft) handleState() {
 				r.self.term++
 				r.stateLock.Unlock()
 
+				r.stopHeartBeatTicker()
+
 				// r.voteForSelf()
 
-				go r.voting()
+				go r.scheduleVoting()
 				r.broadcastVoteCollection()
 
 			case Leader:
@@ -66,7 +84,10 @@ func (r *Raft) handleState() {
 
 				r.stateLock.Lock()
 				r.self.state = Leader
+				r.self.leaderID = r.config.Name
 				r.stateLock.Unlock()
+
+				go r.scheduleHeartBeat()
 
 				r.stopTicker()
 
@@ -79,7 +100,7 @@ func (r *Raft) handleState() {
 	}
 }
 
-func (r *Raft) voting() {
+func (r *Raft) scheduleVoting() {
 	r.resetVotingTicker()
 	for {
 		select {
@@ -106,9 +127,9 @@ func (r *Raft) listenHeartBeat() {
 	go func() {
 		for {
 			select {
-			case <-r.hbChan:
-				// r.self.leaderID = hb.Name
-				// r.resetTicker()
+			case hb := <-r.hbChan:
+				r.self.leaderID = hb.CandidateID
+
 				if r.self.state != Follower {
 					r.becomeFollower()
 				} else {
@@ -141,8 +162,10 @@ func (r *Raft) becomeFollower() {
 
 func (r *Raft) broadcastVoteCollection() error {
 	vr := &voteRequest{
-		CandidateID: r.config.Name,
-		Term:        r.self.term,
+		Self: &heartBeat{
+			CandidateID: r.config.Name,
+			Term:        r.self.term,
+		},
 	}
 
 	for _, node := range r.nodes {
@@ -152,4 +175,32 @@ func (r *Raft) broadcastVoteCollection() error {
 	fmt.Println("The vote collection broadcasted")
 
 	return nil
+}
+
+func (r *Raft) broadcastHeartBeat() error {
+
+	hb := &heartBeat{}
+	hb.Term = r.self.term
+	hb.CandidateID = r.config.Name
+
+	for _, node := range r.nodes {
+		go r.encodeAndSendMsg(node.Addr, heartBeatMsg, &hb)
+	}
+
+	return nil
+}
+
+func (r *Raft) scheduleHeartBeat() {
+	r.resetHeartBeat()
+
+	go func() {
+		for {
+			select {
+			case <-r.heartBeat.C:
+				r.broadcastHeartBeat()
+			case <-r.stopHeartBeat:
+				return
+			}
+		}
+	}()
 }
