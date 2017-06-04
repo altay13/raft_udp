@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 )
 
 const (
@@ -45,8 +46,8 @@ type voteRequest struct {
 }
 
 type voteResponse struct {
-	Term        int
-	VoteGranted bool
+	Term int
+	Vote *Vote
 }
 
 // ListenTCP listens for the RPC calls
@@ -67,6 +68,8 @@ func (r *Raft) ListenTCP() {
 	//
 	// }
 }
+
+var start time.Time
 
 // ListenUDP listens for the udp packages
 func (r *Raft) ListenUDP() {
@@ -90,18 +93,19 @@ func (r *Raft) ListenUDP() {
 
 		switch msgType {
 		case heartBeatMsg:
-			fmt.Printf("Got the Heart beat from <--> %s\n", addr)
+			// fmt.Printf("Got the Heart beat from <--> %s\n", addr)
 			r.handleHeartBeat(addr, buf)
 		case voteRequestMsg:
 			fmt.Printf("Got the Vote Request from <--> %s\n", addr)
-
+			r.handleVoteRequest(addr, buf)
 		case voteResponseMsg:
-			fmt.Printf("Got the Heart beat Response from <--> %s\n", addr)
+			// fmt.Printf("Got the Heart beat Response from <--> %s\n", addr)
+			r.handleVoteResponse(addr, buf)
 		case joinPingMsg:
-			fmt.Printf("Got the Join Ping from <--> %s\n", addr)
-			r.handleJoinPing(addr, buf)
+			// fmt.Printf("Got the Join Ping from <--> %s\n", addr)
+			go r.handleJoinPing(addr, buf)
 		case joinAckRespMsg:
-			fmt.Printf("Got the Join Ack Resp from <--> %s\n", addr)
+			// fmt.Printf("Got the Join Ack Resp from <--> %s\n", addr)
 			r.handleJoinAckResp(addr, buf)
 		default:
 			fmt.Printf("couldn't parse the msg from %s", addr)
@@ -149,6 +153,7 @@ func (r *Raft) handleJoinAckResp(from net.Addr, msg []byte) {
 }
 
 func (r *Raft) handleHeartBeat(from net.Addr, msg []byte) {
+	start = time.Now()
 	var hb heartBeat
 
 	err := decode(msg, &hb)
@@ -157,10 +162,13 @@ func (r *Raft) handleHeartBeat(from net.Addr, msg []byte) {
 		return
 	}
 
-	if len(r.Nodes()) <= 0 {
+	if len(r.Nodes()) <= 0 && r.self.state != Unknown {
+		go r.joinToClusterByAddr(from)
 		// Altay return to here and finish this workflow...
+		return
 	}
 	r.invokeVoteReponse(from, &hb)
+	fmt.Println("HandleHeartBeat: ", time.Since(start))
 }
 
 func (r *Raft) handleVoteRequest(from net.Addr, msg []byte) {
@@ -172,26 +180,56 @@ func (r *Raft) handleVoteRequest(from net.Addr, msg []byte) {
 		return
 	}
 
+	if len(r.Nodes()) <= 0 {
+		return
+	}
+
 	r.invokeVoteReponse(from, vr.Self)
 }
 
 func (r *Raft) invokeVoteReponse(from net.Addr, hb *heartBeat) {
 	vr := &voteResponse{}
+	v := &Vote{}
+
+	v.Voter = r.config.Name
 
 	if hb.Term >= r.self.term {
-		r.beartBeatChan.Lock()
 		r.hbChan <- hb
-		r.beartBeatChan.Unlock()
 
-		vr.VoteGranted = true
+		r.stateLock.Lock()
+		r.self.term = hb.Term
+		r.stateLock.Unlock()
+
+		v.VoteStatus = Voted
 
 	} else {
 		vr.Term = r.self.term
-		vr.VoteGranted = false
+		v.VoteStatus = NotVoted
 	}
+
+	vr.Vote = v
 
 	err := r.encodeAndSendMsg(from, voteResponseMsg, &vr)
 	if err != nil {
 		log.Printf("Failed to send the reponse to the heart beat. Err %s", err)
 	}
+}
+
+func (r *Raft) handleVoteResponse(addr net.Addr, msg []byte) {
+	vr := &voteResponse{}
+
+	err := decode(msg, &vr)
+	if err != nil {
+		log.Printf("Failed to read the HeartBeat UDP packet. Err %s", err)
+		return
+	}
+
+	if r.self.state != Leader {
+		r.votes <- vr.Vote
+	}
+
+	if vr.Term > r.self.term {
+		r.self.term = vr.Term
+	}
+
 }

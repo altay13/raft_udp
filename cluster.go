@@ -12,6 +12,8 @@ import (
 // if response then call RPC for getting the nodes and leader information
 func (r *Raft) joinToClusterByAddr(addr net.Addr) error {
 
+	r.stateCh <- Unknown
+
 	joinTimeout := time.After(100 * time.Millisecond)
 
 	for {
@@ -94,6 +96,10 @@ func (r *Raft) addNode(p *Node) error {
 }
 
 func (r *Raft) invokeJoinAckResp(from net.Addr, p *joinPing) error {
+	if r.self.leaderID == p.Node.Name {
+		return fmt.Errorf("Failed to forward the packet, Leader has not been selected yet")
+	}
+
 	if r.self.state == Leader {
 		ack := &joinAckResp{}
 		node := &Node{
@@ -118,10 +124,17 @@ func (r *Raft) invokeJoinAckResp(from net.Addr, p *joinPing) error {
 
 	} else {
 		// forward the ping to server
-		if len(r.self.leaderID) <= 0 {
-			return nil
+		if len(r.self.leaderID) <= 0 || len(r.Nodes()) <= 0 {
+			return fmt.Errorf("Failed to forward the packet, Leader has not been selected yet")
 		}
-		leaderAddr := r.nodeMap[r.self.leaderID].Addr
+
+		node := r.nodeMap[r.self.leaderID]
+
+		if node == nil {
+			return fmt.Errorf("Failed to forward the packet, Leader has not been selected yet")
+		}
+
+		leaderAddr := node.Addr
 		if len(r.self.leaderID) > 0 {
 			if leaderAddr.String() == from.String() {
 				return nil

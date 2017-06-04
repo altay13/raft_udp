@@ -3,6 +3,7 @@ package raft
 import (
 	"fmt"
 	"net"
+	"time"
 )
 
 // States of node
@@ -16,7 +17,7 @@ const (
 // Voted ...
 const (
 	Voted = iota
-	NotVote
+	NotVoted
 	UnknownVote
 )
 
@@ -43,8 +44,8 @@ type NodeJoin struct {
 
 // Vote ...
 type Vote struct {
-	votedFor   string
-	voteStatus int
+	Voter      string
+	VoteStatus int
 }
 
 func (r *Raft) handleState() {
@@ -56,6 +57,7 @@ func (r *Raft) handleState() {
 				fmt.Println("State Changed to: Follower")
 
 				r.stopHeartBeatTicker()
+				r.stopVotingTicker()
 
 				r.stateLock.Lock()
 				r.self.state = Follower
@@ -75,10 +77,8 @@ func (r *Raft) handleState() {
 				r.stopHeartBeatTicker()
 
 				// r.voteForSelf()
-
-				go r.scheduleVoting()
 				r.broadcastVoteCollection()
-
+				go r.scheduleVoting()
 			case Leader:
 				fmt.Println("State Changed to: Leader")
 
@@ -87,12 +87,18 @@ func (r *Raft) handleState() {
 				r.self.leaderID = r.config.Name
 				r.stateLock.Unlock()
 
-				go r.scheduleHeartBeat()
-
-				r.stopTicker()
+				go func() {
+					r.scheduleHeartBeat()
+					r.stopTicker()
+				}()
 
 				r.releaseVotes()
-
+			case Unknown:
+				go func() {
+					r.stopHeartBeatTicker()
+					r.stopTicker()
+					r.stopVotingTicker()
+				}()
 			}
 		default:
 			continue
@@ -105,10 +111,11 @@ func (r *Raft) scheduleVoting() {
 	for {
 		select {
 		case vt := <-r.votes:
-			fmt.Println(vt)
+			fmt.Println("vote: ", vt)
 			r.addVote(vt)
 		case <-r.votingTimeoutTicker.C:
 			// check the votes and decide what to do next --> Candidate again or Leader
+			fmt.Println("Voting timer ticked: ", r.self.term, "time:", time.Now())
 			r.stopVotingTicker()
 			if r.calculateVotes() {
 				r.becomeLeader()
@@ -128,10 +135,12 @@ func (r *Raft) listenHeartBeat() {
 		for {
 			select {
 			case hb := <-r.hbChan:
+				fmt.Println("Got the HB", hb)
 				r.self.leaderID = hb.CandidateID
 
 				if r.self.state != Follower {
 					r.becomeFollower()
+					return
 				} else {
 					r.resetTicker()
 				}
@@ -167,6 +176,8 @@ func (r *Raft) broadcastVoteCollection() error {
 			Term:        r.self.term,
 		},
 	}
+
+	fmt.Println("Term: ", vr.Self.Term)
 
 	for _, node := range r.nodes {
 		go r.encodeAndSendMsg(node.Addr, voteRequestMsg, &vr)

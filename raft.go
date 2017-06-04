@@ -33,12 +33,13 @@ type Raft struct {
 	votingTimeoutTickerLock sync.Mutex
 	votingTimeoutTicker     *time.Ticker
 
-	beartBeatChan sync.Mutex
-	hbChan        chan *heartBeat // Altay check it
+	hbChan chan *heartBeat // Altay check it
 
 	votes chan *Vote
 
 	stateChanged chan bool
+
+	joinStatus bool
 }
 
 func newRaft(conf *Config) (*Raft, error) {
@@ -63,6 +64,7 @@ func newRaft(conf *Config) (*Raft, error) {
 		votes:        make(chan *Vote, 100),
 		stateChanged: make(chan bool),
 		stateCh:      make(chan int),
+		joinStatus:   false,
 	}
 
 	go r.ListenTCP()
@@ -101,8 +103,8 @@ func createInitState(conf *Config) (*State, error) {
 		leaderID: "",
 		term:     0,
 		vote: &Vote{
-			votedFor:   "",
-			voteStatus: UnknownVote,
+			Voter:      "",
+			VoteStatus: UnknownVote,
 		},
 	}
 
@@ -111,21 +113,12 @@ func createInitState(conf *Config) (*State, error) {
 
 // Join func
 func Join(conf *Config, joinAddr string, port int) (*Raft, error) {
-	r, err := newRaft(conf)
+	r, err := Init(conf)
 	if err != nil {
-		return nil, err
+		log.Printf("Failed to initiate the node. Err %s", err)
 	}
-
-	st, err := createInitState(conf)
-	if err != nil {
-		return nil, err
-	}
-
-	st.state = Unknown
-	r.self = st
 
 	addr := getUDPAddr(joinAddr, port)
-
 	go r.joinToClusterByAddr(addr)
 
 	return r, nil
@@ -147,19 +140,19 @@ func (r *Raft) Shutdown() {
 // GetState temporary function
 func (r *Raft) GetState() {
 
-	fmt.Println("Machine name: ", r.config.Name)
+	// fmt.Println("Machine name: ", r.config.Name)
+	//
+	// fmt.Printf("Nodes: \n")
+	// for num, node := range r.Nodes() {
+	// 	fmt.Printf("%d : %s\n", num, node.Name)
+	// }
 
-	fmt.Printf("Nodes: \n")
-	for num, node := range r.Nodes() {
-		fmt.Printf("%d : %s\n", num, node.Name)
-	}
-
-	switch r.self.state {
-	case Follower:
-		fmt.Println("I am Follower")
-	case Leader:
-		fmt.Println("I am Leader")
-	case Candidate:
-		fmt.Println("I am Candidate")
-	}
+	// switch r.self.state {
+	// case Follower:
+	// 	fmt.Println("I am Follower")
+	// case Leader:
+	// 	fmt.Println("I am Leader")
+	// case Candidate:
+	// 	fmt.Println("I am Candidate")
+	// }
 }

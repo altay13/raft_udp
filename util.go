@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+const (
+	rndTime = 400
+)
+
 func decode(buf []byte, out interface{}) error {
 
 	// create the buffer from input buf []bytes
@@ -58,13 +62,6 @@ func (r *Raft) getUDPAddress() (addr string) {
 	return addr
 }
 
-func getElectionTicker(n int) *time.Ticker {
-	rnd := int(rand.Float32() * 100)
-	intrv := n + rnd
-
-	return time.NewTicker(time.Duration(intrv) * time.Millisecond)
-}
-
 func (r *Raft) encodeAndSendMsg(dest net.Addr, msgType int, msg interface{}) error {
 	buf, err := encode(msgType, msg)
 	if err != nil {
@@ -89,19 +86,19 @@ func (r *Raft) sendMsg(to net.Addr, msg *bytes.Buffer) error {
 
 func (r *Raft) voteForSelf() {
 	vt := &Vote{
-		votedFor:   r.config.Name,
-		voteStatus: Voted,
+		Voter:      r.config.Name,
+		VoteStatus: Voted,
 	}
 	r.votes <- vt
 }
 
 func (r *Raft) addVote(vt *Vote) {
-	node := r.nodeMap[vt.votedFor]
+	node := r.nodeMap[vt.Voter]
 	if node == nil {
-		log.Printf("Node was not found: %s", vt.votedFor)
+		log.Printf("Node was not found: %s", vt.Voter)
 	}
 
-	node.VoteStatus = vt.voteStatus
+	node.VoteStatus = vt.VoteStatus
 }
 
 func (r *Raft) releaseVotes() error {
@@ -118,6 +115,7 @@ func (r *Raft) calculateVotes() bool {
 	online := 0
 	votes := 0
 	for _, node := range r.Nodes() {
+		fmt.Printf("Node %s ; VoteStatus %d\n", node.Name, node.VoteStatus)
 		if node.VoteStatus != UnknownVote {
 			online++
 			if node.VoteStatus == Voted {
@@ -125,12 +123,19 @@ func (r *Raft) calculateVotes() bool {
 			}
 		}
 	}
-
-	if (votes + 1) >= (online+1)/2 {
+	fmt.Printf("Votes: %d, online: %d\n", (votes + 1), (online + 1))
+	if (votes + 1) >= (online+1+1)/2 {
 		return true
 	}
 
 	return false
+}
+
+func getElectionTicker(n int) *time.Ticker {
+	rnd := int(rand.Float32() * rndTime)
+	intrv := n + rnd
+
+	return time.NewTicker(time.Duration(intrv) * time.Millisecond)
 }
 
 func (r *Raft) resetTicker() {
@@ -140,6 +145,9 @@ func (r *Raft) resetTicker() {
 }
 
 func (r *Raft) stopTicker() {
+	if r.electionTimeoutTicker == nil {
+		return
+	}
 	r.electionTimeoutTickerLock.Lock()
 	r.electionTimeoutTicker.Stop()
 	// r.electionTimeoutTicker = nil
@@ -148,11 +156,14 @@ func (r *Raft) stopTicker() {
 
 func (r *Raft) resetVotingTicker() {
 	r.votingTimeoutTickerLock.Lock()
-	r.votingTimeoutTicker = getElectionTicker(r.config.ElectionTime)
+	r.votingTimeoutTicker = getElectionTicker(r.config.VotingTime)
 	r.votingTimeoutTickerLock.Unlock()
 }
 
 func (r *Raft) stopVotingTicker() {
+	if r.votingTimeoutTicker == nil {
+		return
+	}
 	r.votingTimeoutTickerLock.Lock()
 	r.votingTimeoutTicker.Stop()
 	// r.votingTimeoutTicker = nil
@@ -161,14 +172,15 @@ func (r *Raft) stopVotingTicker() {
 
 func (r *Raft) resetHeartBeat() {
 	r.heartBeatLock.Lock()
-	r.heartBeat = getElectionTicker(r.config.ElectionTime - r.config.ElectionTime/2)
+	r.heartBeat = getElectionTicker(r.config.ElectionTime - rndTime)
 	r.heartBeatLock.Unlock()
 }
 
 func (r *Raft) stopHeartBeatTicker() {
 
 	if r.heartBeat == nil {
-		r.heartBeat = getElectionTicker(r.config.ElectionTime - r.config.ElectionTime/2)
+		// r.heartBeat = getElectionTicker(r.config.ElectionTime - r.config.ElectionTime/2)
+		return
 	}
 
 	r.heartBeatLock.Lock()
