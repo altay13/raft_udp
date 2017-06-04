@@ -2,6 +2,11 @@ package raft
 
 import "os"
 
+// RndTime ... Default 200
+const (
+	RndTime = 200
+)
+
 // Config will keep the configurations for n object
 type Config struct {
 	Name         string
@@ -21,8 +26,8 @@ func DefaultConf() *Config {
 		BindAddr:     "127.0.0.1",
 		BindTCPPort:  1111,
 		BindUDPPort:  1111,
-		ElectionTime: 1000,
-		VotingTime:   100,
+		ElectionTime: 500, // default 500
+		VotingTime:   50,  // default 50
 	}
 
 	return config

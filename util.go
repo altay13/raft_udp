@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-const (
-	rndTime = 400
-)
-
 func decode(buf []byte, out interface{}) error {
 
 	// create the buffer from input buf []bytes
@@ -132,7 +128,7 @@ func (r *Raft) calculateVotes() bool {
 }
 
 func getElectionTicker(n int) *time.Ticker {
-	rnd := int(rand.Float32() * rndTime)
+	rnd := int(rand.Float32() * RndTime)
 	intrv := n + rnd
 
 	return time.NewTicker(time.Duration(intrv) * time.Millisecond)
@@ -172,7 +168,7 @@ func (r *Raft) stopVotingTicker() {
 
 func (r *Raft) resetHeartBeat() {
 	r.heartBeatLock.Lock()
-	r.heartBeat = getElectionTicker(r.config.ElectionTime - rndTime)
+	r.heartBeat = getElectionTicker(r.config.ElectionTime - RndTime)
 	r.heartBeatLock.Unlock()
 }
 
